@@ -73,7 +73,13 @@ DOJO_API_TOKEN = os.getenv("DOJO_API_TOKEN", "").strip()
 
 # 无需鉴权的公开路径前缀 (GET 只读)
 PUBLIC_GET_PREFIXES = [
-    "/daily-quote",          # 古籍晨读 → 公开
+    "/daily-quote",          # 古籍晨读
+    "/chronicle",            # 起寐记录 (GET只读)
+    "/tasks",                # 任务列表 (GET只读)
+    "/cultivation",          # 功过格 (GET只读)
+    "/analytics",            # 内省看板
+    "/voice",                # 录音列表 (GET只读)
+    "/goals",                # 长期目标
     "/docs",                 # Swagger UI
     "/openapi.json",         # OpenAPI schema
     "/static",               # 前端静态资源

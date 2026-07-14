@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "dojo-pro": {
+      "type": "stdio",
+      "command": "/Users/meowzart/Desktop/喵系统/.venv/bin/python3",
+      "args": [
+        "dojo_mcp.py"
+      ],
+      "env": {}
+    }
+  }
+}

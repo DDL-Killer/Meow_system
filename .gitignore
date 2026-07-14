@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Build artifacts
+*.dmg
+*.apk
+*.keystore
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Data & Secrets
+*.db
+.env
+audio_uploads/
+*.pem
+
+# Docker
+docker-compose.override.yml
+
+# Archive
+_archive/
+
+# macOS
+.DS_Store
+__MACOSX/
+
+# Node
+node_modules/
+
+# App bundles
+*.app/
+*.appex/
+
+# Sub-projects (separate repos)
+dojo_client/
+dojo_widget/
+
+# Large PDFs
+classics_library/*.pdf
+*.apk
+*.apk.idsig
+dojo.keystore

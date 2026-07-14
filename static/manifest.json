@@ -1,0 +1,23 @@
+{
+  "name": "数字道场 · Digital Dojo",
+  "short_name": "道场",
+  "description": "冷峻修身系统 — 每日规划、功过格积分、AI 情绪分析、古籍晨读",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#1a1a1a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["productivity", "lifestyle"]
+}

@@ -1,0 +1,39 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── IDE ──
+.idea/
+.vscode/
+.DS_Store
+
+# ── Git ──
+.git/
+.gitignore
+
+# ── Docs ──
+*.md
+!CLAUDE.md
+
+# ── Local DB (use volume mount) ──
+*.db
+*.db-journal
+*.db-wal
+
+# ── Uploads ──
+audio_uploads/
+
+# ── Flutter client (not needed in backend image) ──
+dojo_client/
+
+# ── Config ──
+.env
+.env.local
+mcp.json
+digital_dojo.service
+
+# ── PDF library (large, not needed at runtime for API) ──
+classics_library/

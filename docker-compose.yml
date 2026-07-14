@@ -1,0 +1,55 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Digital Dojo · 数字道场 — Docker Compose 编排
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 部署命令:
+#   docker-compose up -d          # 后台启动
+#   docker-compose logs -f dojo   # 查看日志
+#   docker-compose down           # 停止
+#   docker-compose up -d --build  # 重新构建并启动
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+version: "3.9"
+
+services:
+  dojo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: digital-dojo
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"
+
+    # ── 环境变量 ──────────────────────────────────────────────
+    environment:
+      # DeepSeek API Key (用于古籍 AI 萃取的语音分析)
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      # API 鉴权令牌 — 设为非空即开启硬核鉴权 (Bearer Token)
+      # 客户端必须在 Header 中携带: Authorization: Bearer <此令牌>
+      - DOJO_API_TOKEN=${DOJO_API_TOKEN:-}
+      # 数据库目录 (容器内路径, 由 volume 映射)
+      - DOJO_DB_DIR=/app/data
+
+    # ── 数据卷挂载 ────────────────────────────────────────────
+    # SQLite 数据库 dojo_private.db 持久化到宿主机
+    # 容器重启 / 重建均不丢失数据
+    volumes:
+      - dojo_data:/app/data
+      # 音频上传目录也持久化
+      - dojo_audio:/app/audio_uploads
+
+    # ── 健康检查 ──────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ── 命名卷 ────────────────────────────────────────────────────
+volumes:
+  dojo_data:
+    name: digital_dojo_db
+  dojo_audio:
+    name: digital_dojo_audio

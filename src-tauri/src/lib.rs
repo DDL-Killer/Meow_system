@@ -2,62 +2,32 @@ use tauri::Manager;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ProxyResponse {
-    status: u16,
-    body: String,
+struct ProxyResponse { status: u16, body: String }
+
+fn make_request(url: &str, method: &str, body: &str, token: &str) -> Result<ProxyResponse, String> {
+    let full_url = format!("http://localhost:8000{}", url);
+    let client = reqwest::blocking::Client::new();
+    let mut req = match method {
+        "POST" => client.post(&full_url).header("Content-Type", "application/json").body(body.to_string()),
+        "PATCH" => client.patch(&full_url).header("Content-Type", "application/json").body(body.to_string()),
+        "DELETE" => client.delete(&full_url),
+        _ => client.get(&full_url),
+    };
+    if !token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    let resp = req.send().map_err(|e| format!("Failed: {}", e))?;
+    Ok(ProxyResponse { status: resp.status().as_u16(), body: resp.text().unwrap_or_default() })
 }
 
 #[tauri::command]
-async fn api_get(url: String) -> Result<ProxyResponse, String> {
-    let full_url = format!("http://43.163.207.116:8000{}", url);
-    let client = reqwest::Client::new();
-    let resp = client.get(&full_url)
-        .send().await
-        .map_err(|e| format!("请求失败: {}", e))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("读取失败: {}", e))?;
-    Ok(ProxyResponse { status, body })
-}
-
+fn api_get(url: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "GET", "", &token) }
 #[tauri::command]
-async fn api_post(url: String, body_str: String) -> Result<ProxyResponse, String> {
-    let full_url = format!("http://43.163.207.116:8000{}", url);
-    let client = reqwest::Client::new();
-    let resp = client.post(&full_url)
-        .header("Content-Type", "application/json")
-        .body(body_str)
-        .send().await
-        .map_err(|e| format!("请求失败: {}", e))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("读取失败: {}", e))?;
-    Ok(ProxyResponse { status, body })
-}
-
+fn api_post(url: String, body_str: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "POST", &body_str, &token) }
 #[tauri::command]
-async fn api_patch(url: String, body_str: String) -> Result<ProxyResponse, String> {
-    let full_url = format!("http://43.163.207.116:8000{}", url);
-    let client = reqwest::Client::new();
-    let resp = client.patch(&full_url)
-        .header("Content-Type", "application/json")
-        .body(body_str)
-        .send().await
-        .map_err(|e| format!("请求失败: {}", e))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("读取失败: {}", e))?;
-    Ok(ProxyResponse { status, body })
-}
-
+fn api_patch(url: String, body_str: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "PATCH", &body_str, &token) }
 #[tauri::command]
-async fn api_delete(url: String) -> Result<ProxyResponse, String> {
-    let full_url = format!("http://43.163.207.116:8000{}", url);
-    let client = reqwest::Client::new();
-    let resp = client.delete(&full_url)
-        .send().await
-        .map_err(|e| format!("请求失败: {}", e))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("读取失败: {}", e))?;
-    Ok(ProxyResponse { status, body })
-}
+fn api_delete(url: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "DELETE", "", &token) }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

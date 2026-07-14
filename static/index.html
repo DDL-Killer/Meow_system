@@ -354,6 +354,9 @@ if(localStorage.getItem('dq_version')!==APP_VERSION){
 let scope='short_term',failId=null,mr=null,as=null,chunks=[],analRange=7;
 
 // ══════════ API Proxy: Tauri → Rust HTTP, Browser → direct ══════════
+// 部署时在此填入你的服务器配置:
+const API_TOKEN = '';          // 填入 DOJO_API_TOKEN (留空则不启用鉴权)
+const SERVER_HOST = 'localhost:8000';  // 填入你的服务器地址
 const T=window.__TAURI_INTERNALS__||window.__TAURI__;
 const IS_TAURI=!!T;
 const _fetch=window.fetch;
@@ -363,12 +366,15 @@ window.fetch=function(url,opts){
       const m=(opts&&opts.method)||'GET';
       const b=(opts&&opts.body)||'';
       const cmd=m==='POST'?'api_post':m==='PATCH'?'api_patch':m==='DELETE'?'api_delete':'api_get';
-      return T.invoke(cmd,{url:url,bodyStr:typeof b==='string'?b:''}).then(r=>new Response(r.body,{status:r.status}));
+      return T.invoke(cmd,{url:url,bodyStr:typeof b==='string'?b:'',token:API_TOKEN}).then(r=>new Response(r.body,{status:r.status}));
     }
-    return _fetch(url,opts);
+    const headers={}; if(API_TOKEN)headers['Authorization']='Bearer '+API_TOKEN;
+    return _fetch('http://'+SERVER_HOST+url,Object.assign({},opts||{},{headers:Object.assign(headers,(opts&&opts.headers)||{})}));
   }
   return _fetch(url,opts);
 };
+
+// ══════════ Tauri Server Config (修改 src-tauri/src/lib.rs 中的服务器地址) ══════════
 
 // ══════════ INIT ══════════
 async function init(){

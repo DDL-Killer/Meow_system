@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 struct ProxyResponse { status: u16, body: String }
 
-fn make_request(url: &str, method: &str, body: &str, token: &str) -> Result<ProxyResponse, String> {
+async fn make_request(url: &str, method: &str, body: &str, token: &str) -> Result<ProxyResponse, String> {
     let full_url = format!("http://localhost:8000{}", url);
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let mut req = match method {
         "POST" => client.post(&full_url).header("Content-Type", "application/json").body(body.to_string()),
         "PATCH" => client.patch(&full_url).header("Content-Type", "application/json").body(body.to_string()),
@@ -16,18 +16,18 @@ fn make_request(url: &str, method: &str, body: &str, token: &str) -> Result<Prox
     if !token.is_empty() {
         req = req.header("Authorization", format!("Bearer {}", token));
     }
-    let resp = req.send().map_err(|e| format!("Failed: {}", e))?;
-    Ok(ProxyResponse { status: resp.status().as_u16(), body: resp.text().unwrap_or_default() })
+    let resp = req.send().await.map_err(|e| format!("Failed: {}", e))?;
+    Ok(ProxyResponse { status: resp.status().as_u16(), body: resp.text().await.unwrap_or_default() })
 }
 
 #[tauri::command]
-fn api_get(url: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "GET", "", &token) }
+async fn api_get(url: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "GET", "", &token).await }
 #[tauri::command]
-fn api_post(url: String, body_str: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "POST", &body_str, &token) }
+async fn api_post(url: String, body_str: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "POST", &body_str, &token).await }
 #[tauri::command]
-fn api_patch(url: String, body_str: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "PATCH", &body_str, &token) }
+async fn api_patch(url: String, body_str: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "PATCH", &body_str, &token).await }
 #[tauri::command]
-fn api_delete(url: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "DELETE", "", &token) }
+async fn api_delete(url: String, token: String) -> Result<ProxyResponse, String> { make_request(&url, "DELETE", "", &token).await }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

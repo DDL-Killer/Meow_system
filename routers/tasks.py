@@ -17,7 +17,7 @@ from datetime import datetime, date, timezone
 from database import (
     get_db,
     compute_realm,
-    compute_goal_daily_tasks,
+    # compute_goal_daily_tasks,  # v1.1: 长期目标已隐藏
     DOMAINS,
     SCORE_COMPLETE,
     SCORE_FAIL,
@@ -152,6 +152,18 @@ def list_today_tasks():
     today_str = date.today().isoformat()
     with get_db() as conn:
         cur = conn.cursor()
+
+        # ── Auto-fail: yesterday's uncompleted short_term tasks ────
+        cur.execute("""
+            UPDATE tasks SET status = 'failed',
+                   fail_reason = '昨日未完成，自动标记失败',
+                   completed_at = ?
+            WHERE status = 'pending'
+              AND task_scope = 'short_term'
+              AND DATE(created_at) < ?
+              AND type != 'goal_split'
+        """, (datetime.now(timezone.utc).isoformat(), today_str))
+
         # v3.2: LEFT JOIN task_daily_log — semi_permanent tasks with a log
         # entry for today are excluded (they're already done today)
         cur.execute("""
@@ -170,21 +182,11 @@ def list_today_tasks():
 
     tasks = [TaskOut(**dict(r)) for r in rows]
 
-    # Inject goal-split tasks
-    with get_db() as conn:
-        splits = compute_goal_daily_tasks(conn)
-    for s in splits:
-        with get_db() as conn2:
-            c2 = conn2.cursor()
-            c2.execute(
-                "INSERT INTO tasks (title, type, domain, goal_id, task_scope, start_date) VALUES (?, 'goal_split', ?, ?, 'short_term', ?)",
-                (s["title"], s["domain"], s["goal_id"], today_str),
-            )
-        tasks.insert(0, TaskOut(
-            id=c2.lastrowid, title=s["title"], type="goal_split",
-            domain=s["domain"], status="pending", goal_id=s["goal_id"],
-            task_scope="short_term", start_date=today_str,
-        ))
+    # v1.1: 长期目标功能已隐藏 — goal_split 注入已移除
+    # with get_db() as conn:
+    #     splits = compute_goal_daily_tasks(conn)
+    # for s in splits:
+    #     ...
 
     return tasks
 
@@ -222,26 +224,11 @@ def list_tasks(
 
     tasks = [TaskOut(**dict(r)) for r in rows]
 
-    # ── Auto-generate goal split tasks (v2.0) ──────────────────────
-    if date is not None and (type is None or type == "goal_split"):
-        with get_db() as conn:
-            splits = compute_goal_daily_tasks(conn)
-        for s in splits:
-            # Insert into DB so next fetch sees it
-            with get_db() as conn2:
-                c2 = conn2.cursor()
-                c2.execute(
-                    "INSERT INTO tasks (title, type, domain, goal_id) VALUES (?, 'goal_split', ?, ?)",
-                    (s["title"], s["domain"], s["goal_id"]),
-                )
-            tasks.insert(0, TaskOut(
-                id=c2.lastrowid,
-                title=s["title"],
-                type="goal_split",
-                domain=s["domain"],
-                status="pending",
-                goal_id=s["goal_id"],
-            ))
+    # v1.1: 长期目标功能已隐藏
+    # if date is not None and (type is None or type == "goal_split"):
+    #     with get_db() as conn:
+    #         splits = compute_goal_daily_tasks(conn)
+    #     ...
 
     return tasks
 

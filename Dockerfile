@@ -26,6 +26,7 @@ RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends \
         curl \
         ca-certificates \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python 依赖 ───────────────────────────────────────────────

@@ -21,7 +21,8 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from database import init_database
-from routers import tasks, cultivation, voice, classics, analytics, goals, sleep, chronicle
+from routers import tasks, cultivation, voice, classics, analytics, sleep, chronicle
+# from routers import goals  # v1.1: 长期目标已隐藏
 
 # ── Constants ───────────────────────────────────────────────────────────
 
@@ -79,7 +80,6 @@ PUBLIC_GET_PREFIXES = [
     "/cultivation",          # 功过格 (GET只读)
     "/analytics",            # 内省看板
     "/voice",                # 录音列表 (GET只读)
-    "/goals",                # 长期目标
     "/docs",                 # Swagger UI
     "/openapi.json",         # OpenAPI schema
     "/static",               # 前端静态资源
@@ -140,7 +140,7 @@ app.include_router(cultivation.router)
 app.include_router(voice.router)
 app.include_router(classics.router)
 app.include_router(analytics.router)
-app.include_router(goals.router)
+# app.include_router(goals.router)  # v1.1: 长期目标已隐藏
 app.include_router(sleep.router)
 app.include_router(chronicle.router)
 

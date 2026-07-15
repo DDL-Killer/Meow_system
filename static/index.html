@@ -168,6 +168,7 @@ input,select,textarea{font-family:inherit;font-size:15px}
 </div>
 
 <!-- ═══════════ GOALS ═══════════ -->
+<!-- v1.1: 长期目标已隐藏
 <div id="pg-goals" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 0 16px">
     <h2 style="font-size:15px;font-weight:500;letter-spacing:2px">长 期 目 标</h2>
@@ -175,6 +176,8 @@ input,select,textarea{font-family:inherit;font-size:15px}
   </div>
   <div id="goals-list"></div>
   <div id="goals-empty" class="empty">暂无长期目标<br><span style="font-size:11px">设定目标后系统自动拆分为每日任务</span></div>
+</div>
+-->
 </div>
 
 <!-- ═══════════ NAV ═══════════ -->
@@ -188,9 +191,11 @@ input,select,textarea{font-family:inherit;font-size:15px}
   <button data-pg="voice" onclick="navTo('voice')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>录音
   </button>
+  <!-- v1.1: 长期目标已隐藏
   <button data-pg="goals" onclick="navTo('goals')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>目标
   </button>
+  -->
   <button onclick="openTaskModal()" style="display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 14px;background:none;border:none;color:var(--ink);font-size:10px;cursor:pointer">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>事件
   </button>
@@ -284,6 +289,7 @@ input,select,textarea{font-family:inherit;font-size:15px}
 </div>
 
 <!-- ═══════════ GOAL MODAL ═══════════ -->
+<!-- v1.1: 长期目标已隐藏
 <div id="goal-modal" class="modal-bg hidden" onclick="if(event.target===this)closeGoalModal()">
   <div class="modal-sheet">
     <h2>新建目标</h2>
@@ -302,6 +308,7 @@ input,select,textarea{font-family:inherit;font-size:15px}
     <button onclick="closeGoalModal()" style="width:100%;padding:12px;background:none;border:none;color:var(--mu);font-size:13px;cursor:pointer;margin-top:8px">取消</button>
   </div>
 </div>
+-->
 
 <!-- ═══════════ CHRONO CONFIRM MODAL ═══════════ -->
 <div id="chrono-modal" class="modal-bg hidden" onclick="if(event.target===this)closeChronoModal()">
@@ -355,8 +362,9 @@ let scope='short_term',failId=null,mr=null,as=null,chunks=[],analRange=7;
 
 // ══════════ API Proxy: Tauri → Rust HTTP, Browser → direct ══════════
 // 部署时在此填入你的服务器配置:
-const API_TOKEN = '';
-const SERVER_HOST = 'localhost:8000';
+// 部署时修改为你的服务器地址和API令牌
+const API_TOKEN = '';                  // 填入 DOJO_API_TOKEN
+const SERVER_HOST = 'localhost:8000';  // 填入服务器地址
 const T=window.__TAURI_INTERNALS__||window.__TAURI__;
 const IS_TAURI=!!T;
 const _fetch=window.fetch;
@@ -378,10 +386,18 @@ window.fetch=function(url,opts){
 
 // ══════════ INIT ══════════
 async function init(){
+  // 诊断：显示 Tauri 状态和 API 连接
+  const diag=document.getElementById('rec-result');
+  if(diag){
+    diag.style.display='block';
+    diag.innerHTML=`<span style="font-size:10px;color:var(--mu)">连接中…</span>`;
+  }
+  try{
   const[cult,chr]=await Promise.all([
     fetch('/cultivation').then(r=>r.json()).catch(()=>null),
     fetch('/chronicle/today').then(r=>r.json()).catch(()=>null)
   ]);
+  if(diag){diag.innerHTML=`<span style="font-size:10px;color:var(--mu)">功过 ${cult?.score||0} 分</span>`;}
   S.cult=cult; S.chronicle=chr;
   renderCult(); renderChron();
   await loadTasks();
@@ -389,6 +405,11 @@ async function init(){
   // Hide loading overlay
   const overlay=document.getElementById('loading-overlay');
   if(overlay){overlay.classList.add('hide');setTimeout(()=>overlay.remove(),500);}
+  }catch(e){
+    if(diag){diag.innerHTML=`<span style="font-size:10px;color:var(--fail)">连接失败</span>`;}
+    const overlay=document.getElementById('loading-overlay');
+    if(overlay){overlay.classList.add('hide');setTimeout(()=>overlay.remove(),500);}
+  }
 }
 function renderCult(){
   if(!S.cult)return;
@@ -752,16 +773,48 @@ async function loadAnalytics(){
   }
 }
 // ══════════ VOICE ══════════
+function pcmToWAV(audioBuffer){
+  const numChannels=audioBuffer.numberOfChannels;
+  const sampleRate=audioBuffer.sampleRate;
+  const length=audioBuffer.length;
+  const bitsPerSample=16;
+  const data=audioBuffer.getChannelData(0);
+  const buffer=new ArrayBuffer(44+length*2);
+  const view=new DataView(buffer);
+  function w(s,o){view.setUint32(o,s,true)}function ws(s,o){view.setUint16(o,s,true)}
+  w(0x46464952,0);w(36+length*2,4);w(0x45564157,8);w(0x20746D66,12);w(16,16);ws(1,20);ws(numChannels,22);w(sampleRate,24);w(sampleRate*numChannels*bitsPerSample/8,28);ws(numChannels*bitsPerSample/8,32);ws(bitsPerSample,34);w(0x61746164,36);w(length*numChannels*bitsPerSample/8,40);
+  let offset=44;
+  for(let i=0;i<length;i++){const s=Math.max(-1,Math.min(1,data[i]));view.setInt16(offset,s<0?s*0x8000:s*0x7FFF,true);offset+=2;}
+  return buffer;
+}
 async function toggleRecording(){
   if(mr&&mr.state==='recording'){mr.stop();return}
   try{as=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){toast('无法访问麦克风');return}
   chunks=[];mr=new MediaRecorder(as);
   mr.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data)};
   mr.onstop=async()=>{
-    const blob=new Blob(chunks,{type:'audio/webm'});as.getTracks().forEach(t=>t.stop());
+    as.getTracks().forEach(t=>t.stop());
     setRecState('up');
-    try{const f=new FormData();f.append('file',blob,`r_${Date.now()}.webm`);
-      const r=await fetch('/voice/upload',{method:'POST',body:f});const d=await r.json();
+    try{
+      // 转 WAV (WebKit 只支持 PCM)
+      const rawBlob=new Blob(chunks);
+      const ctx=new AudioContext();
+      const pcm=await ctx.decodeAudioData(await rawBlob.arrayBuffer());
+      const wav=pcmToWAV(pcm);
+      const blob=new Blob([wav],{type:'audio/wav'});
+      const fn='r_'+Date.now()+'.wav';
+      let r;
+      if(IS_TAURI){
+        const reader=new FileReader();
+        const b64=await new Promise((resolve,reject)=>{reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(blob);});
+        r=await T.invoke('api_upload',{url:'/voice/upload',fileDataB64:b64,filename:fn,token:API_TOKEN});
+        r=new Response(r.body,{status:r.status});
+      }else{
+        const f=new FormData();f.append('file',blob,fn);
+        r=await _fetch('http://'+SERVER_HOST+'/voice/upload',{method:'POST',body:f,headers:API_TOKEN?{'Authorization':'Bearer '+API_TOKEN}:{}});
+      }
+      if(!r.ok){const e2=await r.text().catch(()=>'');throw new Error(`HTTP ${r.status}: ${e2.slice(0,100)}`)}
+      const d=await r.json();
       const a=d.analysis||{};
       document.getElementById('rec-result').innerHTML=
         `<div style="font-size:13px;color:var(--ink);margin-bottom:6px;font-weight:500">${esc(a.emotion_state||d.emotion_state||'已记录')}</div>`+
@@ -769,7 +822,7 @@ async function toggleRecording(){
         (a.reproof?`<div style="font-size:13px;color:var(--fail);font-style:italic;line-height:1.6">${esc(a.reproof)}</div>`:'');
       document.getElementById('rec-result').style.display='block';
       toast('分析完成');loadVoiceLogs();
-    }catch(e){toast('上传失败')}
+    }catch(e){toast('上传失败: '+(e.message||e));console.error(e)}
     setRecState('idle');
   };
   mr.start();setRecState('rec');
@@ -779,14 +832,36 @@ function setRecState(s){
   document.getElementById('mic-spin').style.display=s==='up'?'block':'none';
   document.getElementById('rec-label').textContent=s==='rec'?'录音中… 再次点击停止':s==='up'?'AI 分析中…':'点击录音';
 }
+let _currentAudio=null, _loadingId=null;
+async function playVoice(id){
+  if(_loadingId===id)return;
+  if(_currentAudio){_currentAudio.pause();_currentAudio=null;}
+  _loadingId=id;
+  const btn=document.querySelector('button[onclick*="playVoice('+id+')"]');
+  if(btn){btn.textContent='加载中…';btn.disabled=true;}
+  try{
+    const buf=await T.invoke('api_get_audio',{url:'/voice/audio/'+id,token:API_TOKEN});
+    const arr=Array.isArray(buf)?buf:(buf instanceof ArrayBuffer?new Uint8Array(buf):null);
+    if(!arr||arr.length<100) throw new Error('empty');
+    const blob=new Blob([new Uint8Array(arr)],{type:'audio/wav'});
+    const a=new Audio(URL.createObjectURL(blob));
+    _currentAudio=a;
+    a.onended=a.onerror=()=>{_currentAudio=null;};
+    await a.play();
+  }catch(e){toast('回放失败');}
+  _loadingId=null;
+  if(btn){btn.textContent='▶ 回放';btn.disabled=false;}
+}
 async function loadVoiceLogs(){
-  try{const logs=await fetch('/voice/logs').then(r=>r.json());
+  try{
+    const logs=await fetch('/voice/logs').then(r=>r.json()).catch(()=>[]);
     const list=document.getElementById('voice-logs'),empty=document.getElementById('voice-empty');
     list.innerHTML='';if(!logs||!logs.length){empty.style.display='block';return}empty.style.display='none';
     logs.slice(0,15).forEach(l=>{
       let analysis={};try{if(l.deepseek_analysis)analysis=JSON.parse(l.deepseek_analysis);}catch(e){}
       const d=document.createElement('div');
       d.style.cssText='padding:12px 0;border-bottom:1px solid var(--ln)';
+      const hasFile=l.file_path&&l.file_path!=='null'&&l.file_path!=='None';
       d.innerHTML=
         `<div style="display:flex;justify-content:space-between;align-items:center">`+
         `<span style="font-size:13px;color:var(--ink)">${esc(l.raw_text||'(无文字)')}</span>`+
@@ -795,10 +870,11 @@ async function loadVoiceLogs(){
         `<span style="color:var(--ink)">${esc(l.emotion_state||'')}</span>`+
         (analysis.core_event?`<span style="color:var(--mu)">${esc(analysis.core_event)}</span>`:'')+
         `</div>`+
-        (analysis.reproof?`<p style="color:var(--fail);font-size:11px;font-style:italic;margin-top:4px">${esc(analysis.reproof)}</p>`:'');
+        (analysis.reproof?`<p style="color:var(--fail);font-size:11px;font-style:italic;margin-top:4px">${esc(analysis.reproof)}</p>`:'')+
+        (hasFile?`<button onclick="playVoice(${l.id})" style="margin-top:4px;padding:3px 10px;background:none;border:0.5px solid var(--ink);color:var(--ink);font-size:10px;cursor:pointer;font-family:inherit">▶ 回放</button>`:'');
       list.appendChild(d);
     });
-  }catch(e){}
+  }catch(e){list.innerHTML='加载失败: '+(e.message||e);}
 }
 // ══════════ NAV ══════════
 function navTo(pg){
@@ -807,7 +883,7 @@ function navTo(pg){
   document.querySelectorAll('nav button[data-pg]').forEach(b=>b.classList.remove('on'));
   const btn=document.querySelector(`nav button[data-pg="${pg}"]`);if(btn)btn.classList.add('on');
   if(pg==='analytics')loadAnalytics();
-  if(pg==='goals')loadGoals();
+  // v1.1: 长期目标已隐藏 if(pg==='goals')loadGoals();
   if(pg==='voice')loadVoiceLogs();
 }
 // ══════════ ADMIN ══════════
@@ -872,9 +948,11 @@ async function adminLoadVoiceList(){
       const btn=document.createElement('button');
       btn.textContent='删除';btn.style.cssText='padding:4px 10px;background:none;border:0.5px solid var(--fail);color:var(--fail);font-size:10px;cursor:pointer;font-family:inherit;flex-shrink:0;margin-left:8px';
       btn.onclick=async()=>{
-        if(!confirm('确认删除此录音？'))return;
-        const r=await fetch(`/voice/${l.id}`,{method:'DELETE'});
+        try{
+        const r=await fetch('/voice/'+l.id,{method:'DELETE'});
         if(r.ok){row.remove();toast('录音已删除');}
+        else{toast('删除失败 HTTP '+r.status);}
+        }catch(e){toast('删除失败 '+e.message);}
       };
       row.appendChild(btn);list.appendChild(row);
     });

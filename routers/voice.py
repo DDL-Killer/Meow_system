@@ -19,10 +19,21 @@ from datetime import date
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from database import get_db
+
+# ── Whisper STT (lazy load, uses CTranslate2 — no PyTorch needed) ─
+_whisper_model = None
+
+def _get_whisper_model():
+    """Lazy-load faster-whisper model (~75MB tiny on first use)."""
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="auto")
+    return _whisper_model
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -56,6 +67,7 @@ class VoiceLogOut(BaseModel):
     deepseek_analysis: Optional[str] = None
     emotion_state: Optional[str] = None
     created_date: Optional[str] = None
+    file_path: Optional[str] = None
 
 
 class AnalysisResponse(BaseModel):
@@ -112,10 +124,17 @@ async def upload_voice(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"文件保存失败: {str(e)}")
 
-    # ── 2. Transcription ─────────────────────────────────────────
-    # STUB: 此处接入语音转文字服务 (Whisper / OpenAI STT / 阿里云ASR)
-    # 当前使用文件原文占位 — 替换为真实转录逻辑后即可全链路跑通
-    raw_text = f"[语音转录待接入 — 文件 {safe_name} 已保存]"
+    play_file = safe_name
+
+    # ── 2. Transcription (faster-whisper STT) ───────────────────
+    try:
+        model = _get_whisper_model()
+        segments, _info = model.transcribe(disk_path, language="zh")
+        raw_text = " ".join([s.text for s in segments]).strip()
+        if not raw_text:
+            raw_text = "(未能识别语音内容)"
+    except Exception as e:
+        raw_text = f"(语音转录失败: {str(e)[:100]})"
 
     # ── 3. DeepSeek-R1 analysis (LIVE) ────────────────────────────
     api_key = os.getenv("DEEPSEEK_API_KEY")
@@ -155,12 +174,21 @@ async def upload_voice(file: UploadFile = File(...)):
     # ── 4. Persist ───────────────────────────────────────────────
     emotion = analysis_json.get("emotion_state", None)
 
+    # Sanitize: strip control characters that break JSON
+    import re as _re
+    _cc_re = _re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+    safe_raw = _cc_re.sub('', raw_text)
+    safe_analysis = _cc_re.sub('', json.dumps(analysis_json, ensure_ascii=False))
+
     with get_db() as conn:
         cur = conn.cursor()
+        # Migration: ensure file_path column exists
+        try: cur.execute("ALTER TABLE voice_logs ADD COLUMN file_path TEXT")
+        except: pass
         cur.execute(
-            """INSERT INTO voice_logs (raw_text, deepseek_analysis, emotion_state, created_date)
-               VALUES (?, ?, ?, ?)""",
-            (raw_text, json.dumps(analysis_json, ensure_ascii=False), emotion, date.today().isoformat()),
+            """INSERT INTO voice_logs (raw_text, deepseek_analysis, emotion_state, created_date, file_path)
+               VALUES (?, ?, ?, ?, ?)""",
+            (safe_raw, safe_analysis, emotion, date.today().isoformat(), play_file),
         )
         log_id = cur.lastrowid
 
@@ -196,14 +224,39 @@ def list_voice_logs(
 
     return [VoiceLogOut(**dict(r)) for r in rows]
 
+@router.get("/audio/{log_id}")
+async def get_voice_audio(log_id: int, token: str = ""):
+    """返回录音原始音频文件。支持 URL 参数 token 或 Authorization Header 鉴权。"""
+    from fastapi.responses import FileResponse
+    api_token = os.getenv("DOJO_API_TOKEN", "")
+    if api_token and token != api_token:
+        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT file_path FROM voice_logs WHERE id = ?", (log_id,))
+        row = cur.fetchone()
+        if not row or not row["file_path"]:
+            raise HTTPException(status_code=404, detail="录音文件不存在")
+        disk_path = os.path.join(AUDIO_TMP_DIR, row["file_path"])
+        if not os.path.exists(disk_path):
+            raise HTTPException(status_code=404, detail="音频文件已丢失")
+        return FileResponse(disk_path, media_type="audio/webm")
+
 @router.delete("/{log_id}", response_model=dict)
 def delete_voice_log(log_id: int):
-    """管理者：删除指定录音记录。"""
+    """管理者：删除指定录音记录（同时删除音频文件）。"""
     from database import get_db
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM voice_logs WHERE id = ?", (log_id,))
-        if not cur.fetchone():
+        cur.execute("SELECT file_path FROM voice_logs WHERE id = ?", (log_id,))
+        row = cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="录音不存在")
+        # Delete audio file from disk
+        if row["file_path"]:
+            fp = os.path.join(AUDIO_TMP_DIR, row["file_path"])
+            if os.path.exists(fp):
+                os.remove(fp)
         cur.execute("DELETE FROM voice_logs WHERE id = ?", (log_id,))
         return {"message": "已删除", "log_id": log_id}

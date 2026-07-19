@@ -15,14 +15,13 @@ import os
 import re
 import shutil
 import uuid
-from datetime import date
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
-from database import get_db
+from database import get_db, dojo_today_str
 
 # ── Whisper STT (lazy load, uses CTranslate2 — no PyTorch needed) ─
 _whisper_model = None
@@ -190,7 +189,7 @@ async def upload_voice(file: UploadFile = File(...)):
         cur.execute(
             """INSERT INTO voice_logs (raw_text, deepseek_analysis, emotion_state, created_date, file_path)
                VALUES (?, ?, ?, ?, ?)""",
-            (safe_raw, safe_analysis, emotion, date.today().isoformat(), play_file),
+            (safe_raw, safe_analysis, emotion, dojo_today_str(), play_file),
         )
         log_id = cur.lastrowid
 

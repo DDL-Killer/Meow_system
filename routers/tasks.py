@@ -12,7 +12,7 @@ The endpoint rejects the request with 422 if it is missing or empty.
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
-from datetime import datetime, date, timedelta, timezone
+from datetime import date, timedelta
 
 from database import (
     get_db,
@@ -22,6 +22,9 @@ from database import (
     SCORE_COMPLETE,
     SCORE_FAIL,
     SCORE_STREAK_7,
+    now_cst_iso,
+    dojo_today_str,
+    dojo_today,
 )
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -127,8 +130,8 @@ def create_tasks(batch: TaskBatchCreate):
         created = []
         for t in batch.tasks:
             cur.execute(
-                "INSERT INTO tasks (title, type, domain, duration_planned, task_scope, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (t.title.strip(), t.type, t.domain, t.duration_planned, t.task_scope, t.start_date, t.end_date),
+                "INSERT INTO tasks (title, type, domain, duration_planned, task_scope, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (t.title.strip(), t.type, t.domain, t.duration_planned, t.task_scope, t.start_date, t.end_date, now_cst_iso()),
             )
             tid = cur.lastrowid
             created.append(
@@ -149,8 +152,14 @@ def list_today_tasks():
       - long_term: today in [start_date, end_date]
       - short_term: created today (or start_date = today)
       - goal_split: auto-generated from active goals
+
+    Uses 5AM cutoff: "today" = dojo date, not calendar date.
     """
-    today_str = date.today().isoformat()
+    today_str = dojo_today_str()
+    # For short_term matching: accept both dojo_today and calendar_today
+    # (handles CST-stored new tasks + UTC-stored legacy tasks)
+    cal_today = date.today().isoformat()
+
     with get_db() as conn:
         cur = conn.cursor()
 
@@ -163,7 +172,7 @@ def list_today_tasks():
               AND task_scope = 'short_term'
               AND DATE(created_at) < ?
               AND type != 'goal_split'
-        """, (datetime.now(timezone.utc).isoformat(), today_str))
+        """, (now_cst_iso(), today_str))
 
         # v3.2: LEFT JOIN task_daily_log — semi_permanent tasks with a log
         # entry for today are excluded (they're already done today)
@@ -173,12 +182,16 @@ def list_today_tasks():
         WHERE t.status = 'pending' AND (
           (t.task_scope = 'semi_permanent' AND dl.id IS NULL)
           OR (t.task_scope = 'long_term' AND t.start_date <= ? AND t.end_date >= ?)
-          OR (t.task_scope = 'short_term' AND DATE(t.created_at) = ?)
-          OR (t.task_scope = 'short_term' AND t.start_date = ?)
-          OR (t.type = 'goal_split' AND DATE(t.created_at) = ?)
+          OR (t.task_scope = 'short_term' AND (DATE(t.created_at) = ? OR DATE(t.created_at) = ?))
+          OR (t.task_scope = 'short_term' AND (t.start_date = ? OR t.start_date = ?))
+          OR (t.type = 'goal_split' AND (DATE(t.created_at) = ? OR DATE(t.created_at) = ?))
         )
         ORDER BY t.created_at DESC
-        """, (today_str, today_str, today_str, today_str, today_str, today_str))
+        """, (today_str,
+              today_str, today_str,
+              today_str, cal_today,
+              today_str, cal_today,
+              today_str, cal_today))
         rows = cur.fetchall()
 
     tasks = [TaskOut(**dict(r)) for r in rows]
@@ -186,7 +199,7 @@ def list_today_tasks():
     # v3.3: detect semi_permanent tasks missed yesterday
     semi_ids = [t.id for t in tasks if t.task_scope == "semi_permanent"]
     if semi_ids:
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (dojo_today() - timedelta(days=1)).isoformat()
         with get_db() as conn:
             cur = conn.cursor()
             placeholders = ",".join("?" for _ in semi_ids)
@@ -260,8 +273,8 @@ def complete_task(task_id: int):
         if not task:
             raise HTTPException(404, "任务不存在")
 
-        today_str = date.today().isoformat()
-        now = datetime.now(timezone.utc).isoformat()
+        today_str = dojo_today_str()
+        now = now_cst_iso()
 
         # ── Semi-permanent: daily log instead of status change ──────
         if task["task_scope"] == "semi_permanent":

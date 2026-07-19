@@ -28,7 +28,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from database import get_db, DOMAINS
+from database import get_db, DOMAINS, dojo_today
 
 router = APIRouter(prefix="/daily-quote", tags=["classics"])
 
@@ -39,8 +39,8 @@ CACHE_SECONDS = 60  # 1 min — frontend localStorage is the real cache layer
 
 def _cached(data: dict) -> JSONResponse:
     """Wrap a dict response with short Cache-Control + date-locked ETag."""
-    today = date.today().toordinal()
-    etag = f'"{today}-{hash(data.get("quote", ""))}"'
+    today_ord = dojo_today().toordinal()
+    etag = f'"{today_ord}-{hash(data.get("quote", ""))}"'
     return JSONResponse(
         content=data,
         headers={
@@ -231,31 +231,18 @@ def get_daily_quote(
     The random seed is pinned to today's date — all calls on the same
     calendar day return the identical quote. Next day: new seed, new quote.
     """
-    # ── Lock quote to today's date ─────────────────────────────────
-    today_ordinal = date.today().toordinal()
-    random.seed(today_ordinal)
+    # ── Date-locked seed — same dojo day = same quote ──
+    random.seed(dojo_today().toordinal())
 
     with get_db() as conn:
         cur = conn.cursor()
 
-        # ── Resolve effective domain ──────────────────────────────
+        # ── Resolve effective domain (explicit params only) ────
         effective_domain = domain
         effective_mood = mood
 
-        if not effective_domain and not effective_mood:
-            # Try last night's voice_log
-            cur.execute(
-                "SELECT emotion_state FROM voice_logs ORDER BY created_date DESC, id DESC LIMIT 1"
-            )
-            last_voice = cur.fetchone()
-            if last_voice and last_voice["emotion_state"]:
-                effective_mood = last_voice["emotion_state"]
-
-        if not effective_domain and effective_mood:
-            effective_domain = EMOTION_TO_DOMAIN.get(effective_mood)
-
         # ── Query corpus size ─────────────────────────────────────
-        cur.execute("SELECT COUNT(*) as cnt FROM parsed_classics WHERE length(content_text) <= 150 AND length(content_text) <= 150 AND char_count >= 10")
+        cur.execute("SELECT COUNT(*) as cnt FROM parsed_classics WHERE char_count >= 10")
         total = cur.fetchone()["cnt"]
 
         if total == 0:
@@ -273,48 +260,32 @@ def get_daily_quote(
                 "note": "经典库为空 — 请先运行古籍注入脚本。此句为王阳明心学硬编码默认警句。",
             })
 
-        chosen = None
-
-        # ── Strategy 1: Domain-targeted — preferred works, quality-sorted ──
+        # ── Pick random work, then best entry from that work ──
+        work_filter = ""
+        work_params: list = []
         if effective_domain and effective_domain in DOMAIN_PREFERRED:
             preferred = DOMAIN_PREFERRED[effective_domain]
             placeholders = ",".join("?" for _ in preferred)
-            cur.execute(
-                f"SELECT * FROM parsed_classics WHERE length(content_text) <= 150 AND source_work IN ({placeholders}) AND char_count >= ? ORDER BY id LIMIT 100",
-                preferred + [MIN_CHARS],
-            )
-            candidates = cur.fetchall()
-            if candidates:
-                candidates = sorted(candidates, key=lambda r: _quality_score(r), reverse=True)
-                # Pick from top 20% quality
-                top_n = max(1, len(candidates) // 5)
-                chosen = random.choice(candidates[:top_n])
+            work_filter = f" AND source_work IN ({placeholders})"
+            work_params = list(preferred)
 
-        # ── Strategy 2: Domain-tagged — broader ────────────────────
-        if chosen is None and effective_domain:
+        cur.execute(
+            f"SELECT DISTINCT source_work FROM parsed_classics WHERE source_work IS NOT NULL AND source_work != '' AND char_count >= ?{work_filter}",
+            [MIN_CHARS] + work_params,
+        )
+        works = [r["source_work"] for r in cur.fetchall()]
+        chosen = None
+        if works:
+            pick_work = random.choice(works)
             cur.execute(
-                "SELECT * FROM parsed_classics WHERE length(content_text) <= 150 AND domain_tags LIKE ? AND char_count >= ? ORDER BY id LIMIT 100",
-                (f"%{effective_domain}%", MIN_CHARS),
+                "SELECT * FROM parsed_classics WHERE source_work = ? AND char_count >= ? ORDER BY id LIMIT 60",
+                (pick_work, MIN_CHARS),
             )
             candidates = cur.fetchall()
             if candidates:
                 candidates = sorted(candidates, key=lambda r: _quality_score(r), reverse=True)
-                top_n = max(1, len(candidates) // 5)
+                top_n = max(1, len(candidates) // 3)
                 chosen = random.choice(candidates[:top_n])
-
-        # ── Strategy 3: Fallback — quality-random from full corpus ──
-        if chosen is None:
-            cur.execute(
-                "SELECT * FROM parsed_classics WHERE length(content_text) <= 150 AND char_count >= ? ORDER BY id LIMIT 200",
-                (MIN_CHARS,),
-            )
-            candidates = cur.fetchall()
-            if candidates:
-                candidates = sorted(candidates, key=lambda r: _quality_score(r), reverse=True)
-                top_n = max(1, len(candidates) // 5)
-                chosen = random.choice(candidates[:top_n])
-            effective_domain = None
-            effective_mood = None
 
         # ── Apply cleaning with retry ────────────────────────────────
         quote, source = _extract_clean_quote(chosen, cur, total)
@@ -412,6 +383,7 @@ def _extract_clean_quote(chosen: dict | None, cur, corpus_total: int) -> tuple[s
 def _quality_score(row) -> int:
     """Higher score = more likely a clean classical passage."""
     text = row["content_text"]
+    source = row["source_work"] or ""
     score = 0
     # Reward: has classical speech markers
     for m in ["曰", "云", "谓", "道"]:
@@ -427,12 +399,19 @@ def _quality_score(row) -> int:
         score += 20
     elif 300 < clen <= 600:
         score += 5
-    # Reward: starts with classical marker
-    for m in ["孟子曰", "荀子曰", "子曰", "老子曰", "庄子曰", "孙子曰",
+    # Reward: starts with classical marker (reduced from 30 — avoid 论语 monopoly)
+    for m in ["孟子曰", "荀子曰", "老子曰", "庄子曰", "孙子曰",
               "韩非子曰", "管子曰", "鬼谷子曰", "淮南子曰", "列子曰"]:
         if text.startswith(m):
-            score += 30
+            score += 20
             break
+    else:
+        if text.startswith("子曰"):
+            score += 5  # 论语太多，降低权重
+    # Diversity: small bonus for less-represented works
+    MAJOR_WORKS = {"楚辞", "诗经", "孟子", "论语"}
+    if source not in MAJOR_WORKS:
+        score += 15  # 冷门典籍提权
     return score
 
 

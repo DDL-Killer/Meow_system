@@ -8,9 +8,14 @@ Run:
     uvicorn main:app --reload --port 8000
 """
 import os
+import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
+# ── 时区：统一使用 Asia/Shanghai (UTC+8) ──────────────────────────
+os.environ['TZ'] = 'Asia/Shanghai'
+time.tzset()
 
 # ── 加载 .env 环境变量（必须在 app 创建之前）────────────────────────
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -73,17 +78,12 @@ app.add_middleware(
 DOJO_API_TOKEN = os.getenv("DOJO_API_TOKEN", "").strip()
 
 # 无需鉴权的公开路径前缀 (GET 只读)
+# 注意: 个人数据接口 (/tasks /voice /chronicle /cultivation /analytics) 一律需要 token,
+#       两个 App 的 Rust 代理层所有请求都自带 Bearer token, 不受影响。
 PUBLIC_GET_PREFIXES = [
-    "/daily-quote",          # 古籍晨读
-    "/chronicle",            # 起寐记录 (GET只读)
-    "/tasks",                # 任务列表 (GET只读)
-    "/cultivation",          # 功过格 (GET只读)
-    "/analytics",            # 内省看板
-    "/voice",                # 录音列表 (GET只读)
-    "/docs",                 # Swagger UI
-    "/openapi.json",         # OpenAPI schema
-    "/static",               # 前端静态资源
-    "/",                     # 根路径 SPA
+    "/daily-quote",          # 古籍晨读 (无个人数据)
+    "/static",               # 前端静态资源 (登录页需要)
+    "/",                     # 根路径 SPA (登录页)
 ]
 
 # 健康检查端点始终放行

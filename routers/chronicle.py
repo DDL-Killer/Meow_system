@@ -9,11 +9,11 @@ POST /chronicle/sleep  — upsert today's sleep_time
 GET  /chronicle/today  — return today's record
 GET  /chronicle/history — past N days
 """
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from database import get_db
+from database import get_db, dojo_today_str, now_cst_iso, now_cst
 
 router = APIRouter(prefix="/chronicle", tags=["chronicle"])
 
@@ -28,17 +28,9 @@ class ChronicleOut(BaseModel):
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _today_str() -> str:
-    return date.today().isoformat()
-
-
-def _now_iso() -> str:
-    return datetime.now().isoformat()
-
-
 def _upsert_today(cur, field: str, value: str):
-    """Ensure today's daily_chronicle row exists, then set field."""
-    today = _today_str()
+    """Ensure today's dojo-date daily_chronicle row exists, then set field."""
+    today = dojo_today_str()
     cur.execute("SELECT id FROM daily_chronicle WHERE record_date = ?", (today,))
     row = cur.fetchone()
     if row:
@@ -62,8 +54,8 @@ class ChronoRequest(BaseModel):
 @router.post("/wake", response_model=dict, status_code=201)
 def wake_up(data: ChronoRequest | None = None):
     """早起打卡 — 支持指定时间和日期。可重复调用，以最后一次为准。"""
-    record_date = data.record_date if data and data.record_date else _today_str()
-    default_time = datetime.now().strftime("%H:%M:%S") if not (data and data.time) else None
+    record_date = data.record_date if data and data.record_date else dojo_today_str()
+    default_time = now_cst().strftime("%H:%M:%S") if not (data and data.time) else None
     ts = record_date + "T" + (data.time + ":00" if data and data.time else default_time)
     with get_db() as conn:
         cur = conn.cursor()
@@ -85,16 +77,16 @@ def wake_up(data: ChronoRequest | None = None):
 @router.post("/sleep", response_model=dict, status_code=201)
 def go_to_sleep(data: ChronoRequest | None = None):
     """入睡打卡 — 5AM分界：未指定日期时，00:00-04:59自动记录为前一天。可重复调用。"""
-    # 5AM cutoff: if no explicit date and current hour < 5, use yesterday
+    # 5AM cutoff: if no explicit date and current Shanghai hour < 5, use yesterday
     if not (data and data.record_date):
-        now = datetime.now()
+        now = now_cst()
         if now.hour < 5:
             record_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         else:
-            record_date = _today_str()
+            record_date = dojo_today_str()
     else:
         record_date = data.record_date
-    default_time = datetime.now().strftime("%H:%M:%S") if not (data and data.time) else None
+    default_time = now_cst().strftime("%H:%M:%S") if not (data and data.time) else None
     ts = record_date + "T" + (data.time + ":00" if data and data.time else default_time)
     with get_db() as conn:
         cur = conn.cursor()
@@ -116,7 +108,7 @@ def go_to_sleep(data: ChronoRequest | None = None):
 @router.get("/today", response_model=dict)
 def get_today():
     """返回今日作息记录。"""
-    today = _today_str()
+    today = dojo_today_str()
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT * FROM daily_chronicle WHERE record_date = ?", (today,))

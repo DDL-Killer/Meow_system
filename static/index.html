@@ -578,7 +578,10 @@ function openChronoModal(type){
   document.getElementById('chrono-modal-icon').textContent=type==='wake'?'起':'寐';
   document.getElementById('chrono-modal-time').textContent=timeStr;
   document.getElementById('chrono-time-input').value=timeStr;
-  document.getElementById('chrono-modal-date').textContent=`${today()} · ${['日','一','二','三','四','五','六'][now.getDay()]}曜日`;
+  const dojoDate=today();
+  const [dy,dm,dd]=dojoDate.split('-').map(Number);
+  const dojoD=new Date(dy,dm-1,dd);
+  document.getElementById('chrono-modal-date').textContent=`${dojoDate} · ${['日','一','二','三','四','五','六'][dojoD.getDay()]}曜日`;
   const warn=document.getElementById('chrono-voice-warn');
   if(type==='sleep'){checkVoiceToday().then(v=>{warn.style.display=v?'none':'block';});}
   else{warn.style.display='none';}
@@ -594,14 +597,11 @@ async function checkVoiceToday(){
 async function confirmChrono(){
   const time=document.getElementById('chrono-time-input').value;
   if(!time)return;
-  const now=new Date();
-  // 5AM cutoff: sleep between 00:00-04:59 belongs to previous day
+  // today() already handles 5AM cutoff: 00:00-04:59 belongs to previous dojo day
   let recordDate=today();
-  if(chronoType==='sleep'){
-    const h=now.getHours();
-    if(h<5)recordDate=new Date(now.getTime()-86400000).toISOString().slice(0,10);
-  }
-  const isYesterday=recordDate!==today();
+  const now=new Date();
+  const calToday=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const isYesterday=recordDate!==calToday;
   const endpoint=chronoType==='wake'?'/chronicle/wake':'/chronicle/sleep';
   try{
     await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({time:time,record_date:recordDate})});
@@ -621,22 +621,15 @@ async function confirmChrono(){
 }
 async function loadQuote(){
   let q=null;
-  // Check for festival/term first
+  // Festival/term → AI诗词; 否则 → 古籍随机
   const ld=getLunarDate();
   const special=ld.term||ld.fest||'';
-  const cacheKey=QK+'_'+today();
   if(special){
-    try{const r=localStorage.getItem(cacheKey);if(r){const c=JSON.parse(r);if(c.date===today())q=c.data;}}catch(e){}
-    if(!q){
-      const kind=ld.term?'term':'festival';
-      q=await fetch(`/daily-quote/festival-quote?name=${encodeURIComponent(special)}&kind=${kind}`,{cache:"no-cache"}).then(r=>r.json()).catch(()=>null);
-      if(q)try{localStorage.setItem(cacheKey,JSON.stringify({date:today(),data:q}))}catch(e){}
-    }
+    const kind=ld.term?'term':'festival';
+    q=await fetch(`/daily-quote/festival-quote?name=${encodeURIComponent(special)}&kind=${kind}`,{cache:'no-cache'}).then(r=>r.json()).catch(()=>null);
   }
-  // Fallback to classics DB
   if(!q){
-    try{const r=localStorage.getItem(QK);if(r){const c=JSON.parse(r);if(c.date===today())q=c.data;}}catch(e){}
-    if(!q){q=await fetch('/daily-quote',{cache:'no-cache'}).then(r=>r.json()).catch(()=>null);if(q)try{localStorage.setItem(QK,JSON.stringify({date:today(),data:q}))}catch(e){}}
+    q=await fetch('/daily-quote',{cache:'no-cache'}).then(r=>r.json()).catch(()=>null);
   }
   if(q){
     document.getElementById('home-quote').textContent=q.quote;
@@ -1097,7 +1090,8 @@ function adminExportDB(){
 }
 
 // ══════════ UTILS ══════════
-function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+// Dojo date: day starts at 5AM. 00:00-04:59 belongs to previous day.
+function today(){const d=new Date();if(d.getHours()<5)d.setDate(d.getDate()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2200)}
 // ══════════ BOOT ══════════

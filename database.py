@@ -5,11 +5,54 @@ Connection management, startup initialization, and dependency injection.
 import sqlite3
 import os
 from contextlib import contextmanager
+from datetime import date, datetime, timedelta, timezone
 
 # Docker 部署时通过 DOJO_DB_DIR 指定数据目录，本地开发默认项目根目录
 _DB_DIR = os.getenv("DOJO_DB_DIR", os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(_DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(_DB_DIR, "dojo_private.db")
+
+# ── Timezone: Asia/Shanghai (must match TZ set in main.py) ─────────────
+CST = timezone(timedelta(hours=8))
+
+
+def now_cst() -> datetime:
+    """Return current datetime in Asia/Shanghai timezone."""
+    return datetime.now(CST)
+
+
+def dojo_today() -> date:
+    """Return the 'dojo day' — day starts at 5AM Shanghai time."""
+    now = now_cst()
+    if now.hour < 5:
+        return (now - timedelta(days=1)).date()
+    return now.date()
+
+
+def dojo_today_str() -> str:
+    """Return dojo date as 'YYYY-MM-DD' string."""
+    return dojo_today().isoformat()
+
+
+def now_cst_iso() -> str:
+    """Return current Shanghai datetime as ISO string for DB storage."""
+    return now_cst().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def utc_to_cst_str(utc_str: str | None) -> str | None:
+    """Convert a UTC datetime string to CST datetime string.
+    Used for migrating existing UTC-stored timestamps.
+    """
+    if not utc_str:
+        return None
+    try:
+        # Parse as UTC datetime
+        utc_dt = datetime.strptime(utc_str.replace("T", " ")[:19], "%Y-%m-%d %H:%M:%S")
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        cst_dt = utc_dt.astimezone(CST)
+        return cst_dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return utc_str  # Return as-is if parsing fails
 
 # ── Constants ───────────────────────────────────────────────────────────
 

@@ -65,6 +65,7 @@ nav button.on svg{opacity:1}
 .act-fail:hover{color:var(--fail)}
 .act-del{width:28px;height:28px;border:none;background:none;color:var(--mu);font-size:16px;cursor:pointer;flex-shrink:0;transition:color .2s;line-height:1}
 .act-del:hover{color:var(--fail)}
+.hidden{display:none}
 .modal-bg{position:fixed;inset:0;background:rgba(28,28,30,.25);backdrop-filter:blur(3px);z-index:200;display:flex;align-items:flex-end;justify-content:center}
 .modal-bg.hidden{display:none}
 .modal-sheet{background:var(--sur);padding:28px 24px 44px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;box-shadow:0 -8px 32px rgba(0,0,0,.08);animation:slideUp .3s ease-out}
@@ -288,6 +289,17 @@ input,select,textarea{font-family:inherit;font-size:15px}
   </div>
 </div>
 
+<!-- ═══════════ LOCK SCREEN (口令锁屏, 不可点击背景关闭) ═══════════ -->
+<div id="lock-modal" class="modal-bg hidden">
+  <div class="modal-sheet">
+    <h2>道场 · 口令</h2>
+    <p style="font-size:12px;color:var(--mu);margin-bottom:12px">首次访问需输入口令，验证通过后本机不再询问</p>
+    <input id="lock-input" class="form-input" type="password" placeholder="访问口令" style="margin-bottom:12px" onkeydown="if(event.key==='Enter')submitUnlock()">
+    <p id="lock-err" style="font-size:12px;color:var(--fail);min-height:16px;margin-bottom:8px"></p>
+    <button onclick="submitUnlock()" style="width:100%;padding:12px;background:none;border:1px solid var(--ink);color:var(--ink);font-size:14px;cursor:pointer;border-radius:8px">进 入</button>
+  </div>
+</div>
+
 <!-- ═══════════ GOAL MODAL ═══════════ -->
 <!-- v1.1: 长期目标已隐藏
 <div id="goal-modal" class="modal-bg hidden" onclick="if(event.target===this)closeGoalModal()">
@@ -362,9 +374,9 @@ let scope='short_term',failId=null,mr=null,as=null,chunks=[],analRange=7;
 
 // ══════════ API Proxy: Tauri → Rust HTTP, Browser → direct ══════════
 // 部署时在此填入你的服务器配置:
-// 部署时修改为你的服务器地址和API令牌
-const API_TOKEN = '';                  // 填入 DOJO_API_TOKEN
-const SERVER_HOST = 'localhost:8000';  // 填入服务器地址
+// 口令不再硬编码 — 首次打开输入一次, 存入 localStorage (key 不带 dq_ 前缀, 避免版本清缓存时被清掉)
+let API_TOKEN = localStorage.getItem('dojo_token') || '';
+const SERVER_HOST = '';  // 浏览器模式使用同源相对路径，Tauri 走 Rust 代理
 const T=window.__TAURI_INTERNALS__||window.__TAURI__;
 const IS_TAURI=!!T;
 const _fetch=window.fetch;
@@ -377,15 +389,45 @@ window.fetch=function(url,opts){
       return T.invoke(cmd,{url:url,bodyStr:typeof b==='string'?b:'',token:API_TOKEN}).then(r=>new Response(r.body,{status:r.status}));
     }
     const headers={}; if(API_TOKEN)headers['Authorization']='Bearer '+API_TOKEN;
-    return _fetch('http://'+SERVER_HOST+url,Object.assign({},opts||{},{headers:Object.assign(headers,(opts&&opts.headers)||{})}));
+    return _fetch(url,Object.assign({},opts||{},{headers:Object.assign(headers,(opts&&opts.headers)||{})}));
   }
   return _fetch(url,opts);
 };
 
 // ══════════ Tauri Server Config (修改 src-tauri/src/lib.rs 中的服务器地址) ══════════
 
+// ══════════ LOCK SCREEN (口令验证) ══════════
+function showLock(){
+  const overlay=document.getElementById('loading-overlay');
+  if(overlay){overlay.classList.add('hide');setTimeout(()=>overlay.remove(),500);}
+  document.getElementById('lock-modal').classList.remove('hidden');
+  document.getElementById('lock-input').focus();
+}
+async function submitUnlock(){
+  const v=document.getElementById('lock-input').value.trim();
+  const err=document.getElementById('lock-err');
+  if(!v){err.textContent='请输入口令';return;}
+  err.style.color='var(--mu)';err.textContent='验证中…';
+  API_TOKEN=v;
+  try{
+    const r=await fetch('/cultivation');
+    const j=await r.json().catch(()=>null);
+    // Tauri 的 api_get 恒返回 status 200, 需同时检查 body 是否为鉴权错误
+    if(r.ok&&j&&!j.detail){
+      localStorage.setItem('dojo_token',v);
+      document.getElementById('lock-modal').classList.add('hidden');
+      err.textContent='';
+      init();
+    }else{
+      API_TOKEN='';err.style.color='var(--fail)';err.textContent='口令错误';
+    }
+  }catch(e){API_TOKEN='';err.style.color='var(--fail)';err.textContent='连接失败: '+e.message;}
+}
+
 // ══════════ INIT ══════════
 async function init(){
+  // 无口令 → 锁屏; 口令失效 (服务器换了token) → 清除并重新锁屏
+  if(!API_TOKEN){showLock();return;}
   // 诊断：显示 Tauri 状态和 API 连接
   const diag=document.getElementById('rec-result');
   if(diag){
@@ -397,6 +439,8 @@ async function init(){
     fetch('/cultivation').then(r=>r.json()).catch(()=>null),
     fetch('/chronicle/today').then(r=>r.json()).catch(()=>null)
   ]);
+  // 口令已失效 (返回鉴权错误) → 清除存储, 重新锁屏
+  if(cult&&cult.detail){localStorage.removeItem('dojo_token');API_TOKEN='';const ov=document.getElementById('loading-overlay');if(ov){ov.classList.add('hide');setTimeout(()=>ov.remove(),500);}showLock();return;}
   if(diag){diag.innerHTML=`<span style="font-size:10px;color:var(--mu)">功过 ${cult?.score||0} 分</span>`;}
   S.cult=cult; S.chronicle=chr;
   renderCult(); renderChron();
@@ -498,12 +542,18 @@ async function loadChronoStats(){
   try{
     const h=await fetch('/chronicle/history?days=90').then(r=>r.json()).catch(()=>[]);
     if(!h||!h.length)return;
+    // Skip today if it has no data yet (day just started, no records)
+    let si=0;
+    if(h[0]&&h[0].record_date===today()&&!h[0].wake_time&&!h[0].sleep_time)si=1;
     let ws=0,ss=0;
-    for(let i=0;i<h.length;i++){if(h[i].wake_time)ws++;else break;}
-    for(let i=0;i<h.length;i++){if(h[i].sleep_time)ss++;else break;}
+    for(let i=si;i<h.length;i++){if(h[i].wake_time)ws++;else break;}
+    for(let i=si;i<h.length;i++){if(h[i].sleep_time)ss++;else break;}
     document.getElementById('streak-wake').textContent=ws||'—';
     document.getElementById('streak-sleep').textContent=ss||'—';
-  }catch(e){}
+  }catch(e){
+    document.getElementById('streak-wake').textContent='—';
+    document.getElementById('streak-sleep').textContent='—';
+  }
 }
 function updateChronoSummary(){
   const el=document.getElementById('chrono-summary');
@@ -551,13 +601,22 @@ async function confirmChrono(){
     const h=now.getHours();
     if(h<5)recordDate=new Date(now.getTime()-86400000).toISOString().slice(0,10);
   }
+  const isYesterday=recordDate!==today();
   const endpoint=chronoType==='wake'?'/chronicle/wake':'/chronicle/sleep';
   try{
     await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({time:time,record_date:recordDate})});
-    toast(chronoType==='wake'?'已记录起床':'已记录入睡');
+    const label=chronoType==='wake'?'起床':'入睡';
+    toast(isYesterday?`已记录昨日${label} (${recordDate.slice(5)})`: `已记录${label}`);
     closeChronoModal();
     const c=await fetch('/chronicle/today').then(r=>r.json());
     if(c){S.chronicle=c;renderChron();}
+    // If recorded for yesterday, merge yesterday's sleep into display so "昨夜安寝" shows correctly
+    if(isYesterday&&chronoType==='sleep'){
+      const yc=await fetch(`/chronicle/history?days=2`).then(r=>r.json()).catch(()=>[]);
+      const yrow=yc.find(d=>d.record_date===recordDate);
+      if(yrow&&S.chronicle)S.chronicle.sleep_time=yrow.sleep_time;
+      renderChron();
+    }
   }catch(e){toast('记录失败');}
 }
 async function loadQuote(){
@@ -570,14 +629,14 @@ async function loadQuote(){
     try{const r=localStorage.getItem(cacheKey);if(r){const c=JSON.parse(r);if(c.date===today())q=c.data;}}catch(e){}
     if(!q){
       const kind=ld.term?'term':'festival';
-      q=await fetch(`/daily-quote/festival-quote?name=${encodeURIComponent(special)}&kind=${kind}`).then(r=>r.json()).catch(()=>null);
+      q=await fetch(`/daily-quote/festival-quote?name=${encodeURIComponent(special)}&kind=${kind}`,{cache:"no-cache"}).then(r=>r.json()).catch(()=>null);
       if(q)try{localStorage.setItem(cacheKey,JSON.stringify({date:today(),data:q}))}catch(e){}
     }
   }
   // Fallback to classics DB
   if(!q){
     try{const r=localStorage.getItem(QK);if(r){const c=JSON.parse(r);if(c.date===today())q=c.data;}}catch(e){}
-    if(!q){q=await fetch('/daily-quote').then(r=>r.json()).catch(()=>null);if(q)try{localStorage.setItem(QK,JSON.stringify({date:today(),data:q}))}catch(e){}}
+    if(!q){q=await fetch('/daily-quote',{cache:'no-cache'}).then(r=>r.json()).catch(()=>null);if(q)try{localStorage.setItem(QK,JSON.stringify({date:today(),data:q}))}catch(e){}}
   }
   if(q){
     document.getElementById('home-quote').textContent=q.quote;
@@ -600,11 +659,14 @@ function renderTasks(){
   S.tasks.forEach(t=>{
     const row=document.createElement('div');
     row.className='task-row fade-in';row.id='task-'+t.id;
+    if(t.missed_yesterday)row.style.borderLeft='2px solid #C44E52';
     const dot=document.createElement('div');
     dot.className='dom-dot';dot.style.background=DC[t.domain]||'#D1D1D6';dot.style.marginTop='4px';
     row.appendChild(dot);
     const info=document.createElement('div');info.className='task-info';
-    const title=document.createElement('p');title.className='task-title';title.textContent=t.title;
+    const title=document.createElement('p');title.className='task-title';
+    title.textContent=(t.missed_yesterday?'⚠️ ':'')+t.title;
+    if(t.missed_yesterday)title.style.color='#C44E52';
     info.appendChild(title);
     const meta=document.createElement('div');meta.className='task-meta';
     meta.innerHTML=`<span>${DL[t.domain]||t.domain}</span>`;
@@ -630,8 +692,8 @@ function renderTasks(){
 // ══════════ TASK ACTIONS ══════════
 async function completeTask(id,row,btn){
   btn.disabled=true;
-  const r=await fetch(`/tasks/${id}/complete`,{method:'PATCH'});
-  if(!r.ok){btn.disabled=false;toast('请勿重复打卡');return}
+  let r;try{r=await fetch(`/tasks/${id}/complete`,{method:'PATCH'});}catch(e){btn.disabled=false;toast('网络错误');return}
+  if(!r.ok){btn.disabled=false;const e=await r.json().catch(()=>({}));toast(e.detail||'操作失败 (HTTP '+r.status+')');return}
   const d=await r.json();
   row.classList.add('done');
   setTimeout(()=>row.remove(),450);
@@ -657,10 +719,19 @@ async function renderDeleteList(){
       row.innerHTML=`<div><span style="font-size:14px;color:var(--ink)">${esc(t.title)}</span><span style="font-size:10px;color:var(--mu);margin-left:8px">${DL[t.domain]||t.domain}</span></div>`;
       const btn=document.createElement('button');
       btn.textContent='删除';btn.className='act-fail';
+      // Tauri WKWebView 不支持原生 confirm(), 改为两次点击确认
       btn.onclick=async()=>{
-        if(!confirm(`确认归档「${t.title}」？`))return;
-        const r=await fetch(`/tasks/${t.id}`,{method:'DELETE'});
-        if(r.ok){row.style.opacity='0';setTimeout(()=>row.remove(),300);toast('已归档');}
+        if(!btn._armed){
+          btn._armed=true;btn.textContent='确认删除';
+          btn._t=setTimeout(()=>{btn._armed=false;btn.textContent='删除';},3000);
+          return;
+        }
+        clearTimeout(btn._t);
+        try{
+          const r=await fetch(`/tasks/${t.id}`,{method:'DELETE'});
+          if(r.ok){row.style.opacity='0';setTimeout(()=>row.remove(),300);toast('已归档');}
+          else{toast('删除失败 HTTP '+r.status);btn._armed=false;btn.textContent='删除';}
+        }catch(e){toast('删除失败 '+e.message);btn._armed=false;btn.textContent='删除';}
       };
       row.appendChild(btn);
       list.appendChild(row);
@@ -671,8 +742,11 @@ function closeFailModal(){failId=null;document.getElementById('fail-modal').clas
 async function submitFail(){
   const reason=document.getElementById('fail-reason').value.trim();
   if(!reason||!failId)return;
-  const r=await fetch(`/tasks/${failId}/fail`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({fail_reason:reason})});
-  if(r.ok){closeFailModal();S.cult=await fetch('/cultivation').then(r=>r.json());renderCult();await loadTasks();}
+  try{
+    const r=await fetch(`/tasks/${failId}/fail`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({fail_reason:reason})});
+    if(r.ok){closeFailModal();S.cult=await fetch('/cultivation').then(r=>r.json());renderCult();await loadTasks();}
+    else{const e=await r.json().catch(()=>({}));toast(e.detail||'操作失败');}
+  }catch(e){toast('网络错误: '+e.message);}
 }
 // ══════════ TASK CREATE ══════════
 function openTaskModal(){document.getElementById('task-modal').classList.remove('hidden');document.getElementById('tm-title').focus();}
@@ -684,11 +758,14 @@ async function createTask(){
   let start=null,end=null;
   if(scope==='long_term'){start=document.getElementById('tm-start').value||today();end=document.getElementById('tm-end').value;if(!end){toast('请选择结束日期');return}}
   else if(scope==='semi_permanent'){start=today();}
-  const r=await fetch('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({tasks:[{title,type:scope==='short_term'?'daily':'long_term',domain,task_scope:scope,start_date:start,end_date:end}]})});
-  if(r.ok){closeTaskModal();document.getElementById('tm-title').value='';scope='short_term';
-    document.querySelectorAll('.scope-tab').forEach((b,i)=>{b.classList.toggle('sel',i===0)});document.getElementById('tm-dates').style.display='none';
-    await loadTasks();toast('已添加');}
+  try{
+    const r=await fetch('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tasks:[{title,type:scope==='short_term'?'daily':'long_term',domain,task_scope:scope,start_date:start,end_date:end}]})});
+    if(r.ok){closeTaskModal();document.getElementById('tm-title').value='';scope='short_term';
+      document.querySelectorAll('.scope-tab').forEach((b,i)=>{b.classList.toggle('sel',i===0)});document.getElementById('tm-dates').style.display='none';
+      await loadTasks();toast('已添加');}
+    else{const e=await r.json().catch(()=>({}));toast(e.detail||'创建失败 (HTTP '+r.status+')');}
+  }catch(e){toast('网络错误: '+e.message);}
 }
 // ══════════ GOALS ══════════
 async function loadGoals(){
@@ -724,9 +801,11 @@ async function loadAnalytics(){
   const ctr=document.getElementById('analytics-content');
   if(!a||(!a.score_trend?.length&&!a.domain_breakdown?.length)){ctr.innerHTML='<div class="empty">打卡数据积累后自动生成</div>';return}
   let h='';
-  // Chart 1: score trend
+  // Stats row
+  h+=`<div style="display:flex;gap:16px;margin-bottom:20px"><div style="flex:1;text-align:center;padding:12px;background:rgba(0,0,0,.03);border-radius:8px"><span style="font-size:22px;font-weight:500;color:var(--ink)">${a.current_score||0}</span><p style="font-size:10px;color:var(--mu);margin-top:4px">功过格总分</p></div><div style="flex:1;text-align:center;padding:12px;background:rgba(0,0,0,.03);border-radius:8px"><span style="font-size:22px;font-weight:500;color:var(--ink)">${a.emotion_distribution?.[0]?.emotion||'—'}</span><p style="font-size:10px;color:var(--mu);margin-top:4px">近日情绪</p></div></div>`;
+  // Chart 1: score trend (task-level points, excludes streak bonuses)
   if(a.score_trend?.length){
-    h+=`<p style="font-size:10px;color:var(--mu);letter-spacing:1px;margin-bottom:8px">积分走势 · ${analRange}天</p><div class="chart-wrap" style="height:160px;margin-bottom:24px"><canvas id="ch1"></canvas></div>`;
+    h+=`<p style="font-size:10px;color:var(--mu);letter-spacing:1px;margin-bottom:4px">积分走势 · ${analRange}天 <span style="opacity:.6">(任务积分, 不含连续奖励)</span></p><div class="chart-wrap" style="height:160px;margin-bottom:24px"><canvas id="ch1"></canvas></div>`;
   }
   // Chart 2: daily completion trend (new)
   if(a.completion_trend?.length){
@@ -811,7 +890,7 @@ async function toggleRecording(){
         r=new Response(r.body,{status:r.status});
       }else{
         const f=new FormData();f.append('file',blob,fn);
-        r=await _fetch('http://'+SERVER_HOST+'/voice/upload',{method:'POST',body:f,headers:API_TOKEN?{'Authorization':'Bearer '+API_TOKEN}:{}});
+        r=await _fetch('/voice/upload',{method:'POST',body:f,headers:API_TOKEN?{'Authorization':'Bearer '+API_TOKEN}:{}});
       }
       if(!r.ok){const e2=await r.text().catch(()=>'');throw new Error(`HTTP ${r.status}: ${e2.slice(0,100)}`)}
       const d=await r.json();
@@ -840,10 +919,17 @@ async function playVoice(id){
   const btn=document.querySelector('button[onclick*="playVoice('+id+')"]');
   if(btn){btn.textContent='加载中…';btn.disabled=true;}
   try{
-    const buf=await T.invoke('api_get_audio',{url:'/voice/audio/'+id,token:API_TOKEN});
-    const arr=Array.isArray(buf)?buf:(buf instanceof ArrayBuffer?new Uint8Array(buf):null);
-    if(!arr||arr.length<100) throw new Error('empty');
-    const blob=new Blob([new Uint8Array(arr)],{type:'audio/wav'});
+    let blob;
+    if(IS_TAURI){
+      const buf=await T.invoke('api_get_audio',{url:'/voice/audio/'+id,token:API_TOKEN});
+      const arr=Array.isArray(buf)?buf:(buf instanceof ArrayBuffer?new Uint8Array(buf):null);
+      if(!arr||arr.length<100) throw new Error('empty');
+      blob=new Blob([new Uint8Array(arr)],{type:'audio/wav'});
+    }else{
+      const r=await _fetch('/voice/audio/'+id+'?token='+encodeURIComponent(API_TOKEN));
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      blob=await r.blob();
+    }
     const a=new Audio(URL.createObjectURL(blob));
     _currentAudio=a;
     a.onended=a.onerror=()=>{_currentAudio=null;};
@@ -862,17 +948,31 @@ async function loadVoiceLogs(){
       const d=document.createElement('div');
       d.style.cssText='padding:12px 0;border-bottom:1px solid var(--ln)';
       const hasFile=l.file_path&&l.file_path!=='null'&&l.file_path!=='None';
+      const rawText=l.raw_text||'(无文字)';
+      const rawShort=rawText.length>20?rawText.slice(0,20)+'…':rawText;
+      const rawLong=rawText.length>20;
+      const hasAnalysis=analysis.core_event||analysis.reproof;
+      const cardId='vc-'+l.id;
       d.innerHTML=
-        `<div style="display:flex;justify-content:space-between;align-items:center">`+
-        `<span style="font-size:13px;color:var(--ink)">${esc(l.raw_text||'(无文字)')}</span>`+
-        `<span style="font-size:10px;color:var(--mu)">${l.created_date||''}</span></div>`+
+        `<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="var s=document.getElementById('${cardId}-raw-short'),f=document.getElementById('${cardId}-raw-full');s.classList.toggle('hidden');f.classList.toggle('hidden');this.querySelector('.fold-arrow').classList.toggle('open')">`+
+        `<span style="font-size:13px;color:var(--ink)"><span id="${cardId}-raw-short">${esc(rawShort)}</span><span id="${cardId}-raw-full" class="hidden">${esc(rawText)}</span><span class="fold-arrow" style="font-size:10px;color:var(--mu);margin-left:4px">${rawLong?'▶':''}</span></span>`+
+        `<span style="font-size:10px;color:var(--mu);flex-shrink:0;margin-left:8px">${l.created_date||''}</span></div>`+
         `<div style="display:flex;gap:8px;margin-top:4px;font-size:10px">`+
         `<span style="color:var(--ink)">${esc(l.emotion_state||'')}</span>`+
-        (analysis.core_event?`<span style="color:var(--mu)">${esc(analysis.core_event)}</span>`:'')+
+        (hasAnalysis?`<span style="color:var(--mu);cursor:pointer" onclick="document.getElementById('${cardId}-ai').classList.toggle('hidden');this.querySelector('.fold-arrow').classList.toggle('open')"><span class="fold-arrow" style="font-size:10px">▶</span> AI 分析</span>`:'')+
         `</div>`+
-        (analysis.reproof?`<p style="color:var(--fail);font-size:11px;font-style:italic;margin-top:4px">${esc(analysis.reproof)}</p>`:'')+
-        (hasFile?`<button onclick="playVoice(${l.id})" style="margin-top:4px;padding:3px 10px;background:none;border:0.5px solid var(--ink);color:var(--ink);font-size:10px;cursor:pointer;font-family:inherit">▶ 回放</button>`:'');
+        (hasAnalysis?`<div id="${cardId}-ai" class="hidden" style="margin-top:6px;padding:8px;background:rgba(0,0,0,.03);border-radius:6px;font-size:11px">`+
+        (analysis.core_event?`<p style="color:var(--ink);margin-bottom:4px">📋 ${esc(analysis.core_event)}</p>`:'')+
+        (analysis.reproof?`<p style="color:var(--fail);font-style:italic">⚡ ${esc(analysis.reproof)}</p>`:'')+
+        `</div>`:'')+
+        (hasFile?`<button onclick="event.stopPropagation();playVoice(${l.id})" style="margin-top:6px;padding:3px 10px;background:none;border:0.5px solid var(--ink);color:var(--ink);font-size:10px;cursor:pointer;font-family:inherit">▶ 回放</button>`:'');
       list.appendChild(d);
+      // Arrow rotation on fold toggle
+      setTimeout(()=>{
+        d.querySelectorAll('.fold-arrow').forEach(ar=>{ar.style.display='inline-block';ar.style.transition='transform .2s';});
+        const style=document.createElement('style');style.textContent='.fold-arrow.open{transform:rotate(90deg)}';
+        d.appendChild(style);
+      },0);
     });
   }catch(e){list.innerHTML='加载失败: '+(e.message||e);}
 }
@@ -970,9 +1070,10 @@ async function adminSetChrono(type){
   if(c){S.chronicle=c;renderChron();}
 }
 async function adminForceRecalc(){
-  await fetch('/tasks/1/complete',{method:'PATCH'}).catch(()=>{});
-  S.cult=await fetch('/cultivation').then(r=>r.json());renderCult();
-  toast('已刷新功过格');
+  // Simply re-fetch cultivation score — does NOT modify any task
+  const c=await fetch('/cultivation').then(r=>r.json()).catch(()=>null);
+  if(c){S.cult=c;renderCult();toast('功过格已刷新: '+c.score+'分 · '+c.current_realm);}
+  else{toast('刷新失败');}
 }
 async function adminExportClassics(){
   toast('正在导出…');try{

@@ -9,7 +9,7 @@ POST /chronicle/sleep  — upsert today's sleep_time
 GET  /chronicle/today  — return today's record
 GET  /chronicle/history — past N days
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
@@ -63,7 +63,8 @@ class ChronoRequest(BaseModel):
 def wake_up(data: ChronoRequest | None = None):
     """早起打卡 — 支持指定时间和日期。可重复调用，以最后一次为准。"""
     record_date = data.record_date if data and data.record_date else _today_str()
-    ts = record_date + "T" + (data.time + ":00" if data and data.time else "00:00:00")
+    default_time = datetime.now().strftime("%H:%M:%S") if not (data and data.time) else None
+    ts = record_date + "T" + (data.time + ":00" if data and data.time else default_time)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM daily_chronicle WHERE record_date = ?", (record_date,))
@@ -72,20 +73,29 @@ def wake_up(data: ChronoRequest | None = None):
             cur.execute("UPDATE daily_chronicle SET wake_time = ? WHERE record_date = ?", (ts, record_date))
         else:
             cur.execute("INSERT INTO daily_chronicle (record_date, wake_time) VALUES (?, ?)", (record_date, ts))
-        cur.execute("SELECT * FROM daily_chronicle WHERE record_date = ?", (_today_str(),))
-        today_record = cur.fetchone()
+        cur.execute("SELECT * FROM daily_chronicle WHERE record_date = ?", (record_date,))
+        record = cur.fetchone()
     return {
         "record_date": record_date,
         "wake_time": ts,
-        "sleep_time": today_record["sleep_time"] if today_record else None,
+        "sleep_time": record["sleep_time"] if record else None,
     }
 
 
 @router.post("/sleep", response_model=dict, status_code=201)
 def go_to_sleep(data: ChronoRequest | None = None):
-    """入睡打卡 — 支持5AM分界。00:00-04:59自动记录为前一天。可重复调用。"""
-    record_date = data.record_date if data and data.record_date else _today_str()
-    ts = record_date + "T" + (data.time + ":00" if data and data.time else "00:00:00")
+    """入睡打卡 — 5AM分界：未指定日期时，00:00-04:59自动记录为前一天。可重复调用。"""
+    # 5AM cutoff: if no explicit date and current hour < 5, use yesterday
+    if not (data and data.record_date):
+        now = datetime.now()
+        if now.hour < 5:
+            record_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            record_date = _today_str()
+    else:
+        record_date = data.record_date
+    default_time = datetime.now().strftime("%H:%M:%S") if not (data and data.time) else None
+    ts = record_date + "T" + (data.time + ":00" if data and data.time else default_time)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM daily_chronicle WHERE record_date = ?", (record_date,))
@@ -94,11 +104,11 @@ def go_to_sleep(data: ChronoRequest | None = None):
             cur.execute("UPDATE daily_chronicle SET sleep_time = ? WHERE record_date = ?", (ts, record_date))
         else:
             cur.execute("INSERT INTO daily_chronicle (record_date, sleep_time) VALUES (?, ?)", (record_date, ts))
-        cur.execute("SELECT * FROM daily_chronicle WHERE record_date = ?", (_today_str(),))
-        today_record = cur.fetchone()
+        cur.execute("SELECT * FROM daily_chronicle WHERE record_date = ?", (record_date,))
+        record = cur.fetchone()
     return {
         "record_date": record_date,
-        "wake_time": today_record["wake_time"] if today_record else None,
+        "wake_time": record["wake_time"] if record else None,
         "sleep_time": ts,
     }
 

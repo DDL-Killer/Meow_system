@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 struct ProxyResponse { status: u16, body: String }
 
-const SERVER: &str = "http://localhost:8000"; // 部署时改为你的服务器地址
+const SERVER: &str = "http://43.163.207.116:8000";
 
 macro_rules! req {
     ($method:ident, $url:expr, $body:expr, $token:expr) => {{
@@ -102,8 +102,25 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event { let _ = window.hide(); api.prevent_close(); }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
         })
-        .run(tauri::generate_context!())
-        .expect("error");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(handle_run_event);
 }
+
+#[cfg(desktop)]
+fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    if let tauri::RunEvent::Reopen { .. } = event {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }
+}
+
+#[cfg(mobile)]
+fn handle_run_event(_app: &tauri::AppHandle, _event: tauri::RunEvent) {}

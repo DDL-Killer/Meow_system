@@ -34,11 +34,11 @@ router = APIRouter(prefix="/daily-quote", tags=["classics"])
 
 MIN_CHARS = 20  # minimum passage length to consider
 MAX_RETRY = 20  # max re-queries when cleaning produces junk
-CACHE_SECONDS = 86400  # 24h cache lock
+CACHE_SECONDS = 60  # 1 min — frontend localStorage is the real cache layer
 
 
 def _cached(data: dict) -> JSONResponse:
-    """Wrap a dict response with 24-hour Cache-Control + date-locked ETag."""
+    """Wrap a dict response with short Cache-Control + date-locked ETag."""
     today = date.today().toordinal()
     etag = f'"{today}-{hash(data.get("quote", ""))}"'
     return JSONResponse(

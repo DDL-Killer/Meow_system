@@ -28,11 +28,13 @@ from database import get_db
 _whisper_model = None
 
 def _get_whisper_model():
-    """Lazy-load faster-whisper model (~75MB tiny on first use)."""
+    """Lazy-load faster-whisper model. Default 'small' (~500MB, good Chinese accuracy).
+       Set WHISPER_MODEL_SIZE env to 'tiny'/'base'/'small'/'medium' to override."""
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="auto")
+        model_size = os.getenv("WHISPER_MODEL_SIZE", "small")
+        _whisper_model = WhisperModel(model_size, device="cpu", compute_type="auto")
     return _whisper_model
 
 router = APIRouter(prefix="/voice", tags=["voice"])

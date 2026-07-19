@@ -12,7 +12,7 @@ The endpoint rejects the request with 422 if it is missing or empty.
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 
 from database import (
     get_db,
@@ -59,6 +59,7 @@ class TaskOut(BaseModel):
     end_date: Optional[str] = None
     created_at: Optional[str] = None
     completed_at: Optional[str] = None
+    missed_yesterday: bool = False  # semi_permanent tasks not done yesterday
 
 
 class FailRequest(BaseModel):
@@ -182,11 +183,21 @@ def list_today_tasks():
 
     tasks = [TaskOut(**dict(r)) for r in rows]
 
-    # v1.1: 长期目标功能已隐藏 — goal_split 注入已移除
-    # with get_db() as conn:
-    #     splits = compute_goal_daily_tasks(conn)
-    # for s in splits:
-    #     ...
+    # v3.3: detect semi_permanent tasks missed yesterday
+    semi_ids = [t.id for t in tasks if t.task_scope == "semi_permanent"]
+    if semi_ids:
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        with get_db() as conn:
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in semi_ids)
+            cur.execute(
+                f"SELECT task_id FROM task_daily_log WHERE task_id IN ({placeholders}) AND log_date = ?",
+                semi_ids + [yesterday],
+            )
+            done_yesterday = {r[0] for r in cur.fetchall()}
+        for t in tasks:
+            if t.task_scope == "semi_permanent" and t.id not in done_yesterday:
+                t.missed_yesterday = True
 
     return tasks
 

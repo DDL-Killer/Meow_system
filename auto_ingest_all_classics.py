@@ -8,7 +8,7 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 DB = BASE / "dojo_private.db"
-SERVER = "43.163.207.116"
+SERVER = "localhost"  # 部署时改为你的服务器地址
 SSH_KEY = BASE / "Meowzart_1.pem"
 
 # ── 数据源: chinese-poetry 仓库 (GitHub) ──────────────────────

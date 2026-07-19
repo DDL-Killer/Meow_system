@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 struct ProxyResponse { status: u16, body: String }
 
-const SERVER: &str = "http://43.163.207.116:8000";
+const SERVER: &str = "http://localhost:8000";  // 部署时改为你的服务器地址
 
 macro_rules! req {
     ($method:ident, $url:expr, $body:expr, $token:expr) => {{

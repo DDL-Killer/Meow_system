@@ -65,11 +65,10 @@ MeowSystem/
 
 `GET /tasks/today` 按日期过滤返回当日应出现的所有 pending 任务。
 
-## 古籍锁定机制
+## 古籍随机机制
 
-`GET /daily-quote` 使用 `random.seed(date.today().toordinal())` 确保全天同一句。
+`GET /daily-quote` 每次请求随机抽取，每次打开应用看到不同的修身警句（4,871 条 corpus）。
 节日/节气自动调用 DeepSeek 生成诗词名句 (`GET /daily-quote/festival-quote`)。
-前端 localStorage 缓存, 跨日自动刷新。
 
 ## 目标倒推引擎
 

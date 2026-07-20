@@ -12,7 +12,7 @@ The endpoint rejects the request with 422 if it is missing or empty.
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 
 from database import (
     get_db,
@@ -115,7 +115,7 @@ def _apply_cultivation(conn, delta: int, reset_streak: bool):
     UPDATE self_cultivation
     SET score = ?, streak_days = ?, current_realm = ?, last_update = ?
     WHERE id = 1
-    """, (new_score, new_streak, new_realm, datetime.now(timezone.utc).isoformat()))
+    """, (new_score, new_streak, new_realm, now_cst_iso()))
     conn.commit()
 
 
@@ -363,7 +363,7 @@ def fail_task(task_id: int, body: FailRequest):
         if task["status"] == "failed":
             raise HTTPException(409, "该任务已标记为失败")
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = now_cst_iso()
         cur.execute(
             "UPDATE tasks SET status = 'failed', fail_reason = ?, completed_at = ? WHERE id = ?",
             (body.fail_reason.strip(), now, task_id),

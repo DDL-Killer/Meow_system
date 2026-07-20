@@ -228,11 +228,10 @@ def get_daily_quote(
       3. Last night's voice_log emotion → auto-mapped → domain-targeted
       4. Fallback → date-seeded selection from full corpus
 
-    The random seed is pinned to today's date — all calls on the same
-    calendar day return the identical quote. Next day: new seed, new quote.
+    The quote is freshly randomized on every request — each app open
+    gets a different修身警句 from the classical corpus.
     """
-    # ── Date-locked seed — same dojo day = same quote ──
-    random.seed(dojo_today().toordinal())
+    # ── Fresh random each request — every open gets a new quote ──
 
     with get_db() as conn:
         cur = conn.cursor()
